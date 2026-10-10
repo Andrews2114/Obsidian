@@ -80,7 +80,7 @@ The PT adapter requests a read-only Pendle convert preview for the amount implie
 
 A missing or blocked route produces REVIEW. A future hypothetical failure does not by itself prevent selling today. An already active failure that reaches an exit dependency requires a usable route reassessment.
 
-There is no machine learning training loop: dependency discovery is a protocol-aware resolver of explicit contract relationships. Protocol size/TVL is not converted into a made-up incident probability.
+The optional **Show experimental ML indicators** panel fits lightweight models on synthetic priors and displays advisory slippage, oracle-anomaly and (where explicit peg inputs exist) depeg estimates. These are not calibrated forecasts, do not infer a security-incident probability, and never change the graph-based decision or the analyst-supplied event probability/severity. Install the optional packages with `pip install -r requirements-ml.txt`; the normal app remains usable without them.
 
 ## Stress testing and incident alerts
 
@@ -124,6 +124,7 @@ Live Chainlink monitoring polls every five seconds while the browser session is 
 | modules/incidents.py | Strict >3% detection, validation, deduplication and latched incidents |
 | modules/mock_data.py | Explicit reference examples |
 | modules/risk_engine.py | Legacy demonstration heuristics and depth proxy; no longer the dashboard's holding-loss model |
+| modules/ml_engine.py | Optional synthetic-prior indicators; advisory only |
 
 ## Tests
 
@@ -132,7 +133,7 @@ Live Chainlink monitoring polls every five seconds while the browser session is 
 .\.venv\Scripts\python.exe -B -m pytest -q
 ~~~
 
-Tests cover paginated address resolution, chain isolation, contract/metadata mismatch, block-pinned evidence, real API response shapes, token decimal conversion, quote route selection, stale/missing prices, no fallback graphs, shared-event double counting, monitor versus backing dependencies, unavailable/blocked exits, portfolio weighting, probability boundaries, dynamic metrics, alerts and graph-state persistence. External services are mocked in automated tests; real integration checks require network access.
+Tests cover paginated address resolution, chain isolation, contract/metadata mismatch, block-pinned evidence, real API response shapes, token decimal conversion, quote route selection, stale/missing prices, no fallback graphs, shared-event double counting, monitor versus backing dependencies, unavailable/blocked exits, portfolio weighting, probability boundaries, dynamic metrics, alerts and graph-state persistence. Optional ML tests are skipped unless `requirements-ml.txt` is installed. External services are mocked in automated tests; real integration checks require network access.
 
 References: [Pendle market contracts](https://docs.pendle.finance/pendle-v2-dev/Contracts/PendleMarket), [SY contracts and pricing](https://docs.pendle.finance/pendle-v2-dev/Contracts/StandardizedYield), [Pendle API overview](https://docs.pendle.finance/pendle-v2-dev/Backend/ApiOverview), [Chainlink](https://docs.chain.link/data-feeds), [DEX Screener](https://docs.dexscreener.com/api/reference), [Streamlit fragments](https://docs.streamlit.io/develop/api-reference/execution-flow/st.fragment).
 

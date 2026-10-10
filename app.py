@@ -124,6 +124,11 @@ with st.sidebar:
                             key=f"stale_{scope_key}")
     liq_drop = st.slider("Simulate AMM Liquidity Drop (%)", 0, 100, 0, key=f"drop_{scope_key}")
     st.caption("The recommendation recalculates whenever a slider changes.")
+    ml_enabled = st.checkbox(
+        "Show experimental ML indicators",
+        value=False,
+        help="Displays synthetic-prior model estimates for comparison only. They do not change the scenario decision.",
+    )
     with st.expander("Oracle failure assumptions"):
         oracle_probability = st.number_input("Loss-event probability after oracle alert (%)", 0.0, 100.0, 50.0) / 100
         oracle_severity = st.number_input("Additional loss if oracle event happens (%)", 0.0, 100.0, 50.0) / 100
@@ -180,7 +185,10 @@ if scenario.get("adapter") == "pendle_pt" and scenario.get("discovery_complete")
     if quote.get("cost_usd") is not None:
         exit_cost = quote["cost_usd"] + gas_usd
         # The quote supplies real execution dependencies, not backing dependencies.
-        parents = ("pool", "chain")
+        # FIX: only attach the exit chain to nodes that actually exist in this graph;
+        # a hardcoded missing id (e.g. "chain") made graph() raise "Unresolved graph edge".
+        existing_ids = {n["node_id"] for n in scenario["dependencies"]}
+        parents = tuple(key for key in ("pool", "chain") if key in existing_ids)
         for key, kind, label, detail in [
             ("router", "Infrastructure", "Pendle execution router", quote.get("router", "unresolved")),
             ("aggregator", "Venue", quote.get("aggregator", "Unresolved aggregator"), "Quote provider; internal venues are not fully expanded."),
@@ -199,6 +207,9 @@ elif eff_liquidity > 0:
 
 by_id = {n["node_id"]: n for n in scenario["dependencies"]}
 shock_targets = [key for key in by_id if key != "position"]
+if not shock_targets:  # FIX: avoid IndexError on a graph that only contains the position
+    st.error("This graph has no dependency other than the position itself, so there is nothing to stress.")
+    st.stop()
 preferred = next((key for key in shock_targets if by_id[key]["type"] == "Yield"),
                  "asset" if "asset" in shock_targets else shock_targets[0])
 with dependency_selector_slot.container():
@@ -224,16 +235,58 @@ if monitor_enabled and monitor_mode == "Live oracle polling":
 if review_reasons:
     result.update(decision="REVIEW", net_benefit_usd=None,
                   reasoning=result["reasoning"] + " " + " ".join(review_reasons))
+
+ml_indicators = None
+ml_import_error = None
+ml_runtime_error = None
+if ml_enabled:
+    # FIX: indicators are advisory, so any failure must degrade to a notice
+    # instead of taking down the whole dashboard.
+    try:
+        from modules.ml_engine import get_pipeline
+        pipeline = get_pipeline()
+        features = scenario.get("ml_features", {})
+        volume_24h = features.get("volume_24h_usd")
+        if volume_24h is None:
+            volume_24h = eff_liquidity
+        ml_indicators = {
+            "slippage": (
+                pipeline.predict_dynamic_slippage(
+                    position_size, eff_liquidity, volume_24h,
+                    features.get("volatility_index", 0.05),
+                )
+                if eff_liquidity > 0 else None
+            ),
+            "oracle": pipeline.detect_oracle_anomaly(
+                int(effective_stale * 3600),
+                # FIX: preset features carry a fixed deviation; an active alert must still register.
+                max(features.get("price_deviation_pct", 0.0), abs(deviation) / 100),
+                features.get("historical_volatility", 0.03),
+            ),
+            "depeg": (
+                pipeline.predict_depeg_probability(
+                    features["backing_ratio"], features["pool_imbalance_ratio"],
+                )
+                if "backing_ratio" in features and "pool_imbalance_ratio" in features
+                else None
+            ),
+            "feature_source": scenario.get("ml_feature_source", "neutral model defaults"),
+        }
+    except ImportError as exc:
+        ml_import_error = str(exc)
+    except Exception as exc:  # noqa: BLE001
+        ml_runtime_error = str(exc)
 nodes = deps.build_dependency_tree(scenario, position_size, effective_stale, liq_drop, deviation)
 for node in nodes:
-    if node.node_id in result["affected_nodes"] and model_severity > 0:
+    # FIX: a zero-probability event should not colour the graph as an affected path.
+    if node.node_id in result["affected_nodes"] and model_severity > 0 and model_probability > 0:
         node.health_status = "critical" if confirmed else "warning"
 st.caption(f"**{scenario['name']}** · {chain_config.name} · data source: {scenario['data_source']}")
 st.caption(scenario.get("model_note", "Reference graph and market inputs are demonstration data."))
 if scenario.get("adapter") == "reference":
     st.info("Reference demo: relationships are predefined. Select Discover Pendle PT Dependencies to verify a real position.")
 if review_reasons:
-    st.warning(result["reasoning"])
+    st.warning(esc(result["reasoning"]))  # FIX: escape $ so amounts are not rendered as LaTeX
 if incident:
     st.warning(f"Active oracle incident: {deviation:+.2f}% movement ({incident['source']}). Reset monitor to clear.")
 if oracle_event:
@@ -266,7 +319,7 @@ with st.expander("Dependency evidence and scope"):
         "Monitor dependencies": ", ".join(n.get("monitor_dependencies", ()))} for n in scenario["dependencies"]])
 
 st.subheader("How the Failure Reaches Your Position")
-st.write(result["trace"])
+st.write(esc(result["trace"]))  # FIX: node labels may contain "$" (e.g. "$200k TVL")
 st.table([{"Dependency": n.label,
     "Additional loss if event happens": f"{result['node_losses'].get(n.node_id, 0):.2%}",
     "Channel": "Backing impaired" if result["node_losses"].get(n.node_id, 0) else "Exit / monitoring / unaffected"}
@@ -316,6 +369,34 @@ with st.container(border=True):
         st.markdown(esc("Modelled advantage: $" + f"{result['net_benefit_usd']:,.0f}"))
     st.markdown(esc(result["reasoning"]))
     st.caption("One-event scenario comparison for an unlevered exposure. These probabilities are analyst inputs, not calibrated forecasts. Lending liquidation, correlated incidents, foregone yield and a multi-position portfolio are outside this model.")
+
+if ml_enabled:
+    with st.expander("Experimental ML indicators (advisory only)", expanded=True):
+        st.warning(
+            "These models are trained on synthetic priors, not historical incident or execution data. "
+            "They never change the graph-based recommendation or its user-supplied probability/severity."
+        )
+        if ml_import_error:
+            st.info(
+                f"ML indicators could not load ({ml_import_error}). Install optional packages with "
+                "`pip install -r requirements-ml.txt` to enable them."
+            )
+        elif ml_runtime_error:
+            st.info(f"ML indicators are unavailable for this input ({ml_runtime_error}). "
+                    "The recommendation above is unaffected.")
+        elif ml_indicators:
+            st.caption(f"Feature inputs: {ml_indicators['feature_source']}.")
+            slippage = ml_indicators["slippage"]
+            st.metric(
+                "ML exit-slippage indicator",
+                f"{slippage:.2%}" if slippage is not None else "Unavailable (no usable liquidity)",
+            )
+            oracle = ml_indicators["oracle"]
+            first, second = st.columns(2)
+            first.metric("Oracle anomaly score", f"{oracle['anomaly_score']:.2f}")
+            second.metric("Modelled stale probability", f"{oracle['predicted_stale_probability']:.2%}")
+            if ml_indicators["depeg"] is not None:
+                st.metric("Synthetic-prior depeg indicator", f"{ml_indicators['depeg']:.2%}")
 
 
 @st.fragment(run_every="5s")

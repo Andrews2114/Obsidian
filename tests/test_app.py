@@ -15,6 +15,10 @@ def button(app, label):
     return next(widget for widget in app.button if widget.label == label)
 
 
+def checkbox(app, label):
+    return next(widget for widget in app.checkbox if widget.label == label)
+
+
 def new_app():
     app = AppTest.from_file(str(APP), default_timeout=30).run()
     assert not app.exception
@@ -117,6 +121,16 @@ def test_active_failure_and_portfolio_scaling_change_recommendation():
     next(c for c in app.checkbox if c.label == "Selected failure is already active").check().run()
     assert not app.exception
     assert any("REVIEW" in item.value for item in app.warning)
+
+
+def test_ml_advisory_is_opt_in_and_does_not_change_scenario_decision():
+    app = new_app()
+    decision = next(item.value for item in app.metric if item.label == "Modelled Loss of Staying")
+    checkbox(app, "Show experimental ML indicators").check().run()
+
+    assert not app.exception
+    assert next(item.value for item in app.metric if item.label == "Modelled Loss of Staying") == decision
+    assert any("synthetic priors" in item.value for item in app.warning)
 
 
 @patch("modules.fetcher.get_token_liquidity")

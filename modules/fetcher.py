@@ -40,6 +40,19 @@ def _mock(fallback_key: str) -> dict:
     return mock_data.MOCK_MARKET_DATA.get(fallback_key, mock_data.MOCK_MARKET_DATA["pendle_pt_eeth"])
 
 
+def _finite_number(value) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _finite_nonnegative(value) -> float | None:
+    number = _finite_number(value)
+    return number if number is not None and number >= 0 else None
+
+
 def _get_web3(chain: str = "ethereum"):
     from web3 import Web3  # imported lazily so the app still loads without web3
 
@@ -118,12 +131,16 @@ def get_token_liquidity(token_address: str, fallback_key: str = "pendle_pt_eeth"
         if not pairs:
             raise ValueError("DEX Screener returned no pairs with liquidity")
         top = max(pairs, key=lambda p: p["liquidity"]["usd"])
+        volume_24h = _finite_nonnegative((top.get("volume") or {}).get("h24"))
+        change_24h = _finite_number((top.get("priceChange") or {}).get("h24"))
         return {
             "top_pair_liquidity_usd": float(top["liquidity"]["usd"]),
             "total_liquidity_usd": float(sum(p["liquidity"]["usd"] for p in pairs)),
             "top_dex": top.get("dexId", "unknown"),
             "pair_count": len(pairs),
             "price_usd": float(top["priceUsd"]) if top.get("priceUsd") else None,
+            "volume_24h_usd": volume_24h,
+            "volatility_index": min(1.0, abs(change_24h) / 100) if change_24h is not None else None,
             "source": "live",
             "chain": chain or top.get("chainId", "ethereum"),
             "pair_address": top.get("pairAddress"),
