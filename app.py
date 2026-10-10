@@ -429,10 +429,18 @@ def poll_oracle():
 
 
 poll_oracle()
+
+from datetime import datetime, timezone
+
 if monitor.history:
     with st.expander("Oracle event history (latest 25 observations)"):
-        st.table(monitor.history)
-if incident and st.session_state.shown_incident != incident["event_id"]:
-    st.session_state.shown_incident = incident["event_id"]
-    st.toast(f"Oracle moved {deviation:+.2f}% — recommendation: {result['decision']}", icon="🚨")
-    incident_popup(incident, result)
+        formatted_history = []
+        for item in monitor.history:
+            formatted_item = item.copy()
+            ts = formatted_item.get("updated_at")
+            if isinstance(ts, (int, float)) and ts > 0:
+                # Convierte el timestamp Unix a hora legible
+                formatted_item["updated_at"] = datetime.fromtimestamp(ts, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+            formatted_history.append(formatted_item)
+            
+        st.table(formatted_history)
