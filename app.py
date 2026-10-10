@@ -1,4 +1,4 @@
-"""DeFi Risk Sentinel — On-Chain Dependency & Portfolio Action Engine."""
+"""DeFi Risk Sentinel - Obsidian — On-Chain Dependency & Portfolio Action Engine."""
 import hashlib
 import math
 
@@ -7,7 +7,7 @@ import streamlit as st
 from modules import dependencies as deps
 from modules import mock_data, risk_engine
 
-st.set_page_config(page_title="DeFi Risk Sentinel", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="Obsidian - DeFi Risk Sentinel", page_icon="🛡️", layout="wide")
 
 
 def esc(text: str) -> str:
@@ -38,7 +38,7 @@ def render_flow(nodes, edges, key: str):
 
 
 # ------------------------------------------------------------------ Header
-st.title("DeFi Risk Sentinel — On-Chain Dependency & Portfolio Action Engine")
+st.title("Obsidian - DeFi Risk Sentinel")
 st.caption("EPFL Hackathon 2026 | Belem Capital Challenge")
 
 # ----------------------------------------------------------------- Sidebar
