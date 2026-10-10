@@ -15,13 +15,13 @@ def test_custom_address_scenario_loading():
     assert sc["token_address"] == valid_address
     assert "Custom position" in sc["name"]
 
-def test_to_flow_elements_conversion():
+def test_to_flow_elements_conversion(monkeypatch):
     """Cubre las Líneas 137-160 ejecutando la conversión a elementos de Streamlit Flow."""
     # 1. Mockear los componentes externos de 'streamlit_flow.elements' para que no falle al importar
     mock_elements = MagicMock()
     mock_elements.StreamlitFlowNode = lambda id, pos, data, style: f"Node_{id}"
-    mock_elements.StreamlitFlowEdge = lambda id, source, target, animated: f"Edge_{id}"
-    sys.modules['streamlit_flow.elements'] = mock_elements
+    mock_elements.StreamlitFlowEdge = lambda id, source, target, **kwargs: f"Edge_{id}"
+    monkeypatch.setitem(sys.modules, 'streamlit_flow.elements', mock_elements)
 
     # 2. Obtener un árbol de nodos real
     nodes = build_dependency_tree("Pendle PT-eETH (Normal)")
@@ -30,12 +30,21 @@ def test_to_flow_elements_conversion():
     flow_nodes, flow_edges = to_flow_elements(nodes)
     
     # 4. Validaciones
-    assert len(flow_nodes) == 5
-    assert len(flow_edges) == 4
+    assert len(flow_nodes) == 6
+    assert "Edge_L3-L5" in flow_edges  # Reference pricing dependency reaches lending.
+    assert "Edge_L3-L4" not in flow_edges  # Do not invent oracle consumption by the AMM.
+    assert "Edge_L5-position" in flow_edges
 
-def test_enrich_live_all_conditional_paths():
+def test_enrich_live_all_conditional_paths(monkeypatch):
     """Fuerza la ejecución de las líneas condicionales remanentes en _enrich_live."""
     from modules.dependencies import _enrich_live
+    from modules import fetcher
+    monkeypatch.setattr(fetcher, "get_chainlink_price", lambda *a, **kw: {
+        "source": "on-chain", "price": 2000, "staleness_hours": .1})
+    monkeypatch.setattr(fetcher, "get_token_liquidity", lambda *a, **kw: {
+        "source": "live", "top_pair_liquidity_usd": 700000})
+    monkeypatch.setattr(fetcher, "get_protocol_tvl", lambda *a, **kw: {
+        "source": "live", "tvl_usd": 100000000})
     
     # Escenario artificial con todos los disparadores posibles activos
     mock_sc = {

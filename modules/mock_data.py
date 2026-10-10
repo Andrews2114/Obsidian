@@ -19,6 +19,7 @@ SCENARIOS = {
     # Scenario 1 — Pendle PT-eETH (healthy)
     # ------------------------------------------------------------------ #
     "pendle_pt_eeth": {
+        "chain": "ethereum",
         "key": "pendle_pt_eeth",
         "fallback_key": "pendle_pt_eeth",
         "name": "Pendle PT-eETH",
@@ -57,6 +58,7 @@ SCENARIOS = {
     # Scenario 2 — Compromised vault / fragile oracle
     # ------------------------------------------------------------------ #
     "compromised_vault": {
+        "chain": "arbitrum",
         "key": "compromised_vault",
         "fallback_key": "compromised_vault",
         "name": "Compromised Vault / Fragile Oracle",

@@ -115,3 +115,18 @@ def test_get_chainlink_price_on_chain_success(mock_get_w3):
     res = get_chainlink_price()
     assert res["source"] == "on-chain"
     assert res["price"] == 3000.0
+
+
+@patch('modules.fetcher.requests.get')
+def test_exit_asset_marks_reject_stale_missing_or_invalid_prices(mock_get):
+    import time
+    response = MagicMock()
+    mock_get.return_value = response
+    coin = "ethereum:0x123"
+    for item in ({"price": 1, "timestamp": time.time() - 901},
+                 {"price": 1}, {"price": float("nan"), "timestamp": time.time()},
+                 {"price": 0, "timestamp": time.time()}):
+        response.json.return_value = {"coins": {coin: item}}
+        assert get_coin_price(coin, max_age_seconds=900) is None
+    response.json.return_value = {"coins": {coin: {"price": .99, "timestamp": time.time()}}}
+    assert get_coin_price(coin, max_age_seconds=900) == .99

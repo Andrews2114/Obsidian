@@ -1,5 +1,5 @@
-streamlit
-web3
-requests
-streamlit-flow-component
-networkx
+streamlit>=1.37,<2
+web3>=7,<9
+requests>=2.31,<3
+streamlit-flow-component>=1.6,<2
+networkx>=3,<4

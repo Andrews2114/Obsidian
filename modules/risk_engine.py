@@ -1,10 +1,13 @@
-"""Expected-value (EV) risk model: exit slippage vs. expected loss of staying.
+"""Legacy reference heuristics and the token/reference exit depth proxy.
 
+The active dashboard uses modules.impact for graph-based scenario losses.
+These older holding weights remain for compatibility, not calibrated risk.
 All percentages are fractions (0.015 == 1.5%).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+from .incidents import exceeds_deviation_threshold
 
 STALE_THRESHOLD_HOURS = 2.0
 ORACLE_STALE_PROB = 0.25
@@ -54,8 +57,9 @@ def calculate_exit_loss(position_size_usd: float, pool_liquidity_usd: float,
 # 2. Stay loss
 # --------------------------------------------------------------------------- #
 def stay_loss_components(oracle_stale: bool, protocol_concentration_risk: float,
-                         depeg_risk: float) -> StayBreakdown:
-    oracle = ORACLE_STALE_PROB if oracle_stale else ORACLE_OK_PROB
+                         depeg_risk: float, oracle_deviation_pct: float = 0.0) -> StayBreakdown:
+    oracle = (ORACLE_STALE_PROB if oracle_stale or exceeds_deviation_threshold(oracle_deviation_pct)
+              else ORACLE_OK_PROB)
     conc = protocol_concentration_risk * CONCENTRATION_WEIGHT
     depeg = depeg_risk * DEPEG_WEIGHT
     return StayBreakdown(oracle, conc, depeg, min(1.0, oracle + conc + depeg))
@@ -85,14 +89,14 @@ def evaluate_decision(position_size_usd: float, exit_loss_pct: float, stay_loss_
     if stay:
         reasoning = (
             f"The expected loss from staying ({stay_loss_pct:.2%}, about ${stay_usd:,.0f}) is lower than "
-            f"the guaranteed cost of exiting ({exit_loss_pct:.2%}, about ${exit_usd:,.0f}). "
+            f"the estimated cost of exiting ({exit_loss_pct:.2%}, about ${exit_usd:,.0f}). "
             f"Holding preserves roughly ${net_benefit:,.0f} of expected value, so keep the position and "
             f"monitor oracle freshness and pool depth."
         )
     else:
         reasoning = (
             f"The expected loss from staying ({stay_loss_pct:.2%}, about ${stay_usd:,.0f}) exceeds "
-            f"the guaranteed cost of exiting ({exit_loss_pct:.2%}, about ${exit_usd:,.0f}). "
+            f"the estimated cost of exiting ({exit_loss_pct:.2%}, about ${exit_usd:,.0f}). "
             f"Exiting now saves roughly ${net_benefit:,.0f} of expected value, so unwind before "
             f"dependency risk is realised."
         )
@@ -115,7 +119,7 @@ def layer_risk_table(nodes, stay: StayBreakdown, exit_: ExitBreakdown) -> list:
         if n.type == "Yield":
             risk, note = stay.depeg_pct, "Asset depeg risk x 0.8"
         elif n.type == "Oracle":
-            risk, note = stay.oracle_pct, "Oracle failure (25% if stale, else 0.2%)"
+            risk, note = stay.oracle_pct, "Demo oracle loss weight (25% for stale/deviating feed, else 0.2%)"
         elif n.type == "Lending":
             risk, note = stay.concentration_pct, "TVL concentration exploit risk x 0.1"
         elif n.type == "AMM":

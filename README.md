@@ -1,364 +1,141 @@
-# Obsidian
+# Obsidian — DeFi Risk Sentinel
 
-https://obsidian-sentinel.streamlit.app
+Streamlit prototype that discovers supported DeFi dependencies, propagates a failure through the holding's backing, and compares its assumed expected loss with an exit cost.
 
-DeFi Risk Sentinel is a Streamlit-based risk-analysis dashboard for evaluating whether a DeFi position should be exited or held under stress conditions. It models dependency risk across settlement, yield, oracle, AMM, and lending layers, then compares the guaranteed cost of unwinding a position against the expected loss of staying in it.
+Hosted reference demo: https://obsidian-sentinel.streamlit.app. Local changes require redeployment to appear there.
 
-This project was built for the EPFL Hackathon 2026 / Belem Capital Challenge and focuses on portfolio action decisions for risky on-chain positions.
+## Run locally
 
-## Project overview
+On Windows:
 
-The application helps portfolio managers answer a simple but critical question:
+~~~powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m streamlit run app.py --server.address=127.0.0.1 --server.port=8502
+~~~
 
-> Should we exit a DeFi position now, or stay and monitor?
+On macOS/Linux use python3 to create the virtual environment and .venv/bin/python to run it. Python 3.10+ is supported.
 
-It does this by combining:
+## View real dependency discovery
 
-- a five-layer dependency model of the position
-- live on-chain and market data enrichment when available
-- offline fallback scenarios if external APIs fail
-- a stress test for oracle staleness and liquidity deterioration
-- an expected-value decision engine that recommends the better action
+1. Open http://127.0.0.1:8502/ and select **Discover Pendle PT Dependencies**.
+2. Select Ethereum and leave **Fetch live pool data** enabled.
+3. Use the included market example: **0x34280882267ffa6383b363e278b027be083bbe3b**, or enter a Pendle PT address on the selected chain. A market address selects its PT exposure, not its LP shares.
+4. Inspect **Dependency evidence and scope**. Contract addresses, evidence block, backing relationships, exit relationships and monitoring inputs are shown separately.
+5. Select **Dependency that fails**, its incident type, probability over the chosen horizon, and additional loss severity.
+6. Read **How the Failure Reaches Your Position**, portfolio loss, the quoted PT → USDC exit cost and the break-even probability.
 
-The dashboard is designed to be easy to understand: the user can switch between preset scenarios, inspect a dependency tree, simulate stress conditions, and see how the recommendation changes as market assumptions worsen.
+The market example currently represents PT-stETH-30DEC2027. Its backing path is PT → SY-stETH → wstETH → stETH. Names and prices come from current API responses; maturity is verified on-chain. PT is not assumed to be worth $1.
 
-## What the app does
+Discovery resolves a matching market/PT through the paginated Pendle market catalogue, restricted to the selected chain. It checks market.readTokens(), PT.decimals(), PT.expiry(), SY.getTokensOut(), SY.assetInfo() and SY.exchangeRate() at one block. The yield provider's name is API metadata; the relationships are verified contract reads. Failed verification produces REVIEW rather than a made-up Pendle graph.
 
-The app presents a single dashboard with:
+**Discover Token Dependencies** selects a token's deepest observed pool on Ethereum, Arbitrum or Optimism. WETH exposure is a configured supported case. A pool match for another token does not prove its backing/yield stack is understood: that exposure remains unresolved and requires a protocol adapter. L2 settlement and sequencer relationships are configuration, not an automatic bridge or liveness audit.
 
-- position selection (preset reference positions or a custom token/position contract address)
-- live or mock scenario loading
-- risk metrics for expected exit cost and expected loss of staying
-- a dependency graph showing the five layers of the position
-- an interactive stress test for:
-  - oracle staleness in hours
-  - AMM liquidity drop as a percentage
-- a recommended action: STAY or EXIT
+**Preset Reference Positions** are predefined demonstration graphs. Even with live price/TVL enrichment, these are not discovered holdings and do not establish a real Morpho position.
 
-### Default scenarios
+**Refresh data** clears the 60-second discovery and 30-second exit-quote caches.
 
-The repo includes two preset scenarios:
+## Challenge compliance audit
 
-1. Pendle PT-eETH (Normal)
-   - relatively healthy reference environment
-   - deep liquidity, fresh oracle, low concentration risk
+The implementation is a working, narrow prototype, not complete coverage of arbitrary DeFi positions.
 
-2. Compromised Vault / Fragile Oracle
-   - high-risk scenario with stale pricing and thin AMM depth
-   - elevated protocol concentration and depeg risk
+| Requirement | Current status | Evidence and remaining scope |
+| --- | --- | --- |
+| Automatically uncover hidden dependencies | Partial, supported Pendle PT and WETH scope | Resolves verified PT/SY/yield/accounting-asset relationships and real pools. Lending, debt balances, arbitrary wrappers and protocol-internal dependencies remain unsupported. |
+| Estimate security, market and technical incident impact | Conditional scenario model implemented; calibration incomplete | A selected event's assumed haircut propagates through backing links. Probability and severity are analyst inputs, not estimates learned from incident history. Temporary outages can have zero backing loss while still blocking exit. |
+| Explain failure propagation | Implemented for discovered backing and exit links | Typed graph, affected-node table and explicit path to the holding. A price-monitor alert has no backing-loss effect without an economic path. |
+| Compare staying with exiting, including costs | Implemented for supported PT sale previews | Finite-horizon expected additional loss vs PT → USDC quote including swap/aggregator fees and a separate gas budget. Missing quotes or active route impairment require REVIEW. Other modes use an explicitly uncalibrated depth proxy. |
+| Quantify portfolio impact | Implemented for one holding within a portfolio NAV | Reports conditional/expected loss and exit cost as fractions of total NAV. Multiple holdings, debt, liquidation cascades and correlated events are not aggregated. |
+| Working implementation with real data | Implemented and integration-checked | Live Pendle metadata, block-pinned RPC evidence, PT sale quote, USDC price, Chainlink observations and DEX metadata. Public endpoint availability still affects usability. |
 
-There is also support for custom addresses, which start from the Pendle template and then enrich the scenario with live data if valid.
+At the start of this repair, custom discovery only located a token pool. The holding-loss calculation did not use the graph, preset graphs were arranged as a misleading linear stack, there was no holding horizon or portfolio NAV, and a stale/deviating oracle imposed a fixed 25% loss. The graph component also recreated timestamped state on every rerun, which could trigger repeated redraws. These issues have been addressed in the active dashboard.
+
+## Model and design choices
+
+Edges have three roles:
+
+- **capital**: backing/value impairment can reach the holding;
+- **exit**: needed to execute the modelled route;
+- **monitor**: observational input, not proof of an economic dependency.
+
+The display points from a dependency toward its dependent. Red solid edges are backing links; blue dashed edges are exit links; grey dashed edges are monitoring links. A verified relationship does not establish that the dependency is healthy.
+
+The current model considers one event at a time:
+
+~~~text
+conditional additional loss = current position value × propagated additional haircut
+expected additional loss    = event probability over the chosen horizon × conditional loss
+portfolio loss fraction     = loss dollars / total portfolio NAV
+exit cost                   = current marked input value − quoted output value + gas budget
+break-even probability      = exit cost / conditional additional loss
+~~~
+
+A shared event arriving through two backing paths is counted once, using the maximum transmitted haircut instead of summing the paths. This is a transparent 1:1 backing assumption for an unlevered exposure. It is not a general weighted loss cascade or leverage model.
+
+For example, a $100,000 holding in a $1 million portfolio with a 30% conditional haircut has a $30,000 conditional loss, or 3% of NAV. At an assumed 10% event probability over seven days, its expected loss is $3,000, or 0.3% of NAV. An $1,100 exit cost is 0.11% of NAV. The break-even event probability is about 3.67%.
+
+Severity always describes an **additional future loss from today's mark**. A price movement that already reduced today's mark is not charged again. A confirmed selected failure has a 100% event probability in the dashboard; its remaining-loss severity is still an assumption.
+
+The PT adapter requests a read-only Pendle convert preview for the amount implied by the current USD mark and verified token decimals. It selects the returned route with the greatest USDC output, marks USDC at a live price rather than assuming a dollar peg, and rejects price marks older than 15 minutes. Swap/aggregator fees are already in the quoted output and are not added twice. The gas budget defaults to $50 and can be changed; it is not an RPC gas estimate. Route construction does not sign or submit a trade, guarantee a mined fill, verify the user's balance/approvals, or prove every external route venue's safety.
+
+A missing or blocked route produces REVIEW. A future hypothetical failure does not by itself prevent selling today. An already active failure that reaches an exit dependency requires a usable route reassessment.
+
+There is no machine learning training loop: dependency discovery is a protocol-aware resolver of explicit contract relationships. Protocol size/TVL is not converted into a made-up incident probability.
+
+## Stress testing and incident alerts
+
+Liquidity-drop (0–100%) and oracle-staleness sliders update the badge, metrics and graph without a submit button.
+
+For Pendle, the liquidity stress model is a **proxy**: request a current-pool quote at trade size divided by the remaining liquidity fraction, then scale the resulting cost down to the original holding. This assumes uniformly reduced depth; it is not Pendle's exact time-aware AMM simulation. A 100% liquidity drop makes the route unavailable. The unstressed PT cost is a real current quote preview.
+
+Token/reference exit costs use the legacy depth proxy: 0.5 × (position / pool liquidity)² plus an assumed 0.5% fee, capped at 100%. This is not executable trading depth.
+
+Oracle staleness and >3% alerts select the visible oracle probability/severity assumptions only when the graph contains an economic oracle dependency. That oracle scenario replaces the currently selected event; it is not added to it. A benchmark feed on a standalone PT or WETH holding still triggers an alert but does not invent an oracle-induced capital loss.
+
+For the simulated event demo:
+
+1. Enable **Oracle incident alerts** and select **Simulated log subscription**.
+2. Set the simulated price change to -5% and click **Publish simulated oracle log**.
+3. A banner, toast and modal show the recommendation under the current graph and assumptions.
+4. **Acknowledge incident** closes the modal; **Reset monitor / clear incident** clears the latched incident.
+
+Exactly +3% or -3% does not alert. Each new observation is compared with the preceding valid observation; unchanged updates and duplicate rounds do not create another breach. Feed/chain/source switches reset the monitoring scope.
+
+Live Chainlink monitoring polls every five seconds while the browser session is active. The first valid round establishes a baseline. Invalid or failed reads are never replaced with simulated incident prices. This is session polling, not a persistent background subscription. A Chainlink round timestamp alone does not establish the appropriate feed-specific heartbeat policy.
+
+## Next refinements, in priority order
+
+1. Add actual lending adapters: wallet/market positions, collateral, debt, LLTV/LTV and liquidation penalties, plus the actual consumed oracle contract. A collateral-token match alone is not evidence the user has borrowed.
+2. Expand provider internals and bridge dependencies using verified adapter interfaces, with explicit coverage/confidence and unresolved nodes.
+3. Replace default probabilities/haircuts with documented, time-horizon-specific incident evidence, uncertainty ranges and sensitivity analysis. Include opportunity cost and shared portfolio exposures.
+4. Replace the Pendle liquidity proxy with a protocol-specific reserve-state simulation; estimate gas from a funded-wallet simulation and validate alternative routes under a dependency failure.
 
 ## Architecture
 
-```text
-Obsidian/
-├── app.py                     # Streamlit application entry point
-├── requirements.txt          # Python dependencies
-├── LICENSE                   # Project license
-├── README.md                 # Project documentation
-├── modules/
-│   ├── __init__.py           # Module package initializer
-│   ├── dependencies.py       # Scenario loading, health rules, dependency graph
-│   ├── fetcher.py            # Live RPC + DeFiLlama / DEX Screener fetchers
-│   ├── mock_data.py          # Offline fallback scenarios and static market data
-│   └── risk_engine.py        # EV model + decision logic
-└── .venv/                    # local environment (if created by the user)
-```
-
-### Main modules
-
-#### app.py
-
-This is the dashboard entry point. It:
-
-- sets page configuration for Streamlit
-- loads the scenario for either a preset or a custom address
-- lets the user tune stress assumptions
-- computes exit and stay metrics
-- renders the dependency graph and recommendation panels
-
-#### modules/dependencies.py
-
-Responsible for:
-
-- scenario lookup and data enrichment
-- regex validation for Ethereum-style addresses
-- health classification for Oracle and AMM nodes
-- construction of the dependency tree used in the visualization
-- conversion into Streamlit Flow elements for rendering
-
-#### modules/fetcher.py
-
-This module implements live data fetchers for:
-
-- Chainlink oracle heartbeat via public RPC (`latestRoundData`)
-- DEX Screener token liquidity lookups
-- DeFiLlama protocol TVL data
-- helper functions for coin prices and yield pools
-
-If a live call fails, the app falls back to the static mock data automatically.
-
-#### modules/mock_data.py
-
-Contains:
-
-- preset scenario definitions
-- mock market data used when the network is unavailable
-- protocol TVL values used as fallback inputs
-
-#### modules/risk_engine.py
-
-Implements the decision model:
-
-- exit loss decomposition
-- stay loss decomposition
-- oracle staleness logic
-- recommendation engine
-- layer-by-layer risk table used in the analysis panel
-
-## Risk model
-
-The application uses a compact expected-value framework.
-
-### 1) Exit loss
-
-The exit side is modeled as:
-
-- slippage cost: quadratic in position size relative to liquidity
-- fixed execution/base fee
-- total exit cost = slippage + fee
-
-In code, the model is approximately:
-
-```python
-slippage = min(1.0, (position_size_usd / pool_liquidity_usd) ** 2 * 0.5)
-exit_total = min(1.0, slippage + base_fee_pct)
-```
-
-This means thin pools and large positions produce a much higher exit cost.
-
-### 2) Stay loss
-
-The stay side combines the risk of:
-
-- oracle failure / stale pricing
-- concentration risk in the protocol or market
-- depeg risk in the underlying yield or collateral stack
-
-The model uses weighted effects:
-
-```python
-oracle = 0.25 if stale else 0.002
-conc = protocol_concentration_risk * 0.1
-depeg = depeg_risk * 0.8
-stay_total = min(1.0, oracle + conc + depeg)
-```
-
-### 3) Recommendation rule
-
-The app compares:
-
-- guaranteed exit loss in USD
-- expected loss of staying in USD
-
-and chooses the lower-cost action:
-
-- `STAY` if the expected loss of staying is lower than the guaranteed exit loss
-- `EXIT` otherwise
-
-This is intentionally simple and interpretable for decision support.
-
-## Dependency layers
-
-Each position is represented as a five-layer dependency graph:
-
-1. Settlement layer
-2. Yield layer
-3. Oracle layer
-4. AMM layer
-5. Lending layer
-
-These layers are color-coded in the visualization:
-
-- green = healthy
-- yellow = warning
-- red = critical
-
-The AMM and Oracle nodes are recalculated live under user stress inputs, while other layers keep their baseline risk state.
-
-## Live data behavior
-
-The app supports optional live enrichment using public endpoints.
-
-### Live sources
-
-- Chainlink oracle data via public Ethereum RPC
-- DEX Screener for token liquidity
-- DefiLlama for protocol TVL
-
-### Fallback strategy
-
-If any live call fails or is rate-limited, the app silently falls back to the offline mock datasets in `modules/mock_data.py` and continues running. This makes the dashboard usable even in offline or restricted environments.
-
-## Setup
-
-### Prerequisites
-
-- Python 3.10+ recommended
-- pip
-- Internet access for live data enrichment (optional)
-
-### Install
-
-```bash
-cd /workspaces/Obsidian
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-### Run the app
-
-```bash
-streamlit run app.py
-```
-
-Then open the local Streamlit URL shown in the terminal, usually:
-
-```text
-http://localhost:8501
-```
-
-## Usage
-
-### Option 1: preset scenarios
-
-Choose from the sidebar:
-
-- `Preset Reference Positions`
-- then select a scenario such as `Pendle PT-eETH (Normal)` or `Compromised Oracle Vault (High Risk)`
-
-You can also enable:
-
-- `Refresh with live RPC / API data`
-
-This triggers live fetches for oracle freshness and liquidity, while falling back to mock data if needed.
-
-### Option 2: custom contract address
-
-Select:
-
-- `Custom Contract Address`
-- paste a valid Ethereum address such as `0x...`
-
-The app validates the address format and then loads a scenario based on the Pendle template, enriching it with live data if possible.
-
-### Stress testing
-
-Use the sliders in the sidebar to simulate:
-
-- oracle staleness in hours
-- AMM liquidity drop percentage
-
-As the sliders move:
-
-- oracle node health changes
-- AMM node health changes
-- exit loss calculations update
-- the decision recommendation may flip between STAY and EXIT
-
-## Expected dashboard flow
-
-The dashboard contains several sections:
-
-1. Header and scenario summary
-2. Controls sidebar
-3. Core risk metrics
-4. Dependency visualizer
-5. Decision analysis and stress-breakdown tables
-6. Recommendation panel with reasoning text
-
-This creates a simple workflow:
-
-- choose scenario
-- stress the market assumptions
-- inspect the dependency stack
-- interpret the recommendation and expected value
-
-## Key files and responsibilities
-
-| File | Purpose |
+| File | Responsibility |
 | --- | --- |
-| `app.py` | Streamlit UI and user interaction flow |
-| `modules/dependencies.py` | Scenario logic, health grade rules, graph building |
-| `modules/fetcher.py` | RPC and public API live reads |
-| `modules/mock_data.py` | Scenario baseline and fallback datasets |
-| `modules/risk_engine.py` | EV risk calculations and action recommendation |
+| app.py | Dashboard, assumptions, portfolio metrics, persistent graph state, alerts and polling |
+| modules/chains.py | Chain IDs, RPC URLs, WETH and price-feed configuration |
+| modules/pendle.py | Paginated PT/market resolution, block-pinned verification and sale quote previews |
+| modules/discovery.py | Typed dependency graphs and supported discovery scope |
+| modules/dependencies.py | Reference graphs, health display and flow conversion |
+| modules/impact.py | Backing-loss propagation, exit availability, finite-horizon comparison and NAV weighting |
+| modules/fetcher.py | Chainlink, DEX Screener and DeFiLlama data |
+| modules/incidents.py | Strict >3% detection, validation, deduplication and latched incidents |
+| modules/mock_data.py | Explicit reference examples |
+| modules/risk_engine.py | Legacy demonstration heuristics and depth proxy; no longer the dashboard's holding-loss model |
 
-## Dependencies
+## Tests
 
-The project currently uses:
+~~~powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -B -m pytest -q
+~~~
 
-```text
-streamlit
-web3
-requests
-streamlit-flow-component
-networkx
-```
+Tests cover paginated address resolution, chain isolation, contract/metadata mismatch, block-pinned evidence, real API response shapes, token decimal conversion, quote route selection, stale/missing prices, no fallback graphs, shared-event double counting, monitor versus backing dependencies, unavailable/blocked exits, portfolio weighting, probability boundaries, dynamic metrics, alerts and graph-state persistence. External services are mocked in automated tests; real integration checks require network access.
 
-The app is designed to degrade gracefully when optional integrations are unavailable. In particular, `streamlit-flow-component` is optional from a runtime perspective, and the dashboard shows a warning if it is absent.
-
-## Troubleshooting
-
-### `streamlit-flow-component` missing
-
-If the graph fails to render, install the dependencies again:
-
-```bash
-pip install -r requirements.txt
-```
-
-If the component still is not available, you may need to reinstall it in the active virtual environment.
-
-### Live data not loading
-
-This is expected in some environments. The app automatically falls back to mock data. The app will still function without external network access.
-
-### Invalid address error
-
-The app accepts an Ethereum-like address in the form:
-
-```text
-0x + 40 hex characters
-```
-
-For example:
-
-```text
-0x1234567890abcdef1234567890abcdef12345678
-```
-
-## Known limitations
-
-- This is a decision-support dashboard, not a production-grade risk engine for regulated financial deployment.
-- Live data is best-effort and depends on public API availability and rate limits.
-- The model intentionally uses simplified heuristics so that the tradeoff between exit cost and stay risk is readable and explainable.
-- Custom address mode starts from a Pendle PT-eETH template and enriches the scenario rather than building a fully new position-specific model from scratch.
-
-## Summary
-
-Obsidian is a compact but practical DeFi risk dashboard that turns dependency analysis into an actionable decision. It combines live chain data, fallback offline datasets, and an understandable expected-value model to help a user decide whether a position should be exited or held under stress.
-
-It is especially useful for evaluating:
-
-- oracle fragility
-- AMM depth shocks
-- concentration risk
-- depeg risk
-- position liquidation / unwind tradeoffs
+References: [Pendle market contracts](https://docs.pendle.finance/pendle-v2-dev/Contracts/PendleMarket), [SY contracts and pricing](https://docs.pendle.finance/pendle-v2-dev/Contracts/StandardizedYield), [Pendle API overview](https://docs.pendle.finance/pendle-v2-dev/Backend/ApiOverview), [Chainlink](https://docs.chain.link/data-feeds), [DEX Screener](https://docs.dexscreener.com/api/reference), [Streamlit fragments](https://docs.streamlit.io/develop/api-reference/execution-flow/st.fragment).
 
 ## License
 
-This project is distributed under the repository license specified in the root `LICENSE` file.
+See LICENSE.
