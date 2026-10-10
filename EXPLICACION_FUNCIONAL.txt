@@ -1,0 +1,358 @@
+OBSIDIAN - DEFI RISK SENTINEL
+Explicacion funcional del proyecto
+
+Version del documento: 10 de octubre de 2026
+
+1. PROPOSITO Y ALCANCE
+
+Obsidian es una aplicacion web hecha con Streamlit para explorar algunas
+dependencias DeFi y comparar, bajo un escenario elegido por el usuario, la
+perdida esperada de mantener una posicion con el coste estimado de salir de
+ella. La aplicacion presenta las relaciones como un grafo, muestra por donde
+podria transmitirse una perdida y calcula el impacto de una posicion sobre el
+NAV total de una cartera.
+
+No es un asesor financiero, no ejecuta transacciones y no predice de forma
+calibrada la probabilidad de hackeos, depegs o fallos. El usuario introduce la
+probabilidad y la severidad del evento. El modelo activo considera un evento a
+la vez y una posicion sin apalancamiento. No calcula saldos de wallet, deuda,
+liquidaciones de prestamos, eventos correlacionados ni riesgo agregado de
+varias posiciones.
+
+Los modos de descubrimiento tienen alcance limitado:
+- Pendle: resuelve posiciones de Principal Token (PT) y verifica relaciones
+  seleccionadas mediante consultas a contratos.
+- Token: localiza pools observados para un token en Ethereum, Arbitrum u
+  Optimism. WETH es el caso de exposicion soportado por configuracion; que otro
+  token tenga pool no significa que su respaldo este entendido.
+- Presets: escenarios de demostracion con grafos predefinidos, no posiciones
+  descubiertas en una wallet.
+
+2. RECORRIDO FUNCIONAL EN LA INTERFAZ
+
+2.1 Fuente de la posicion
+
+En el panel lateral se elige una de estas opciones:
+
+- Preset Reference Positions: carga uno de los escenarios de demostracion
+  descritos en modules/mock_data.py. Se puede solicitar enriquecimiento con
+  datos en vivo; esto no convierte el grafo predefinido en una posicion real.
+- Discover Token Dependencies: acepta una direccion EVM y una cadena, obtiene
+  datos de DEX Screener y construye un grafo acotado a token, pool y cadena.
+- Discover Pendle PT Dependencies: acepta la direccion de un mercado Pendle o
+  de un PT. Busca el mercado en el catalogo paginado, verifica relaciones
+  on-chain y calcula una vista previa de venta PT a USDC.
+
+La direccion debe tener el formato 0x seguido de 40 caracteres hexadecimales.
+La cadena forma parte de la identidad de la posicion: una direccion igual en
+dos redes no se trata automaticamente como el mismo activo.
+
+Los datos descubiertos se cachean durante 60 segundos y las cotizaciones
+durante 30 segundos. El boton Refresh data vacia ambas caches.
+
+2.2 Supuestos y controles
+
+- Position Size: valor USD de la posicion analizada.
+- Total portfolio NAV: valor total de cartera; no puede ser menor que la
+  posicion.
+- Decision horizon: periodo al que se refiere la probabilidad introducida.
+- Incident type: etiqueta descriptiva del escenario (seguridad, mercado o
+  fallo tecnico); no cambia por si sola las formulas.
+- Failure probability: probabilidad asumida por el usuario para ese horizonte.
+- Additional loss severity: perdida adicional condicional al evento, entre 0
+  y 100 por ciento.
+- Gas / execution overhead: presupuesto USD introducido por el usuario, no
+  estimacion on-chain del gas.
+- Selected failure is already active: considera el evento seleccionado
+  confirmado y fija su probabilidad a 100 por ciento. Si afecta la ruta de
+  salida, se requiere revision.
+- Simulate Oracle Staleness: estresa la antiguedad del feed; se presenta en el
+  grafo y puede activar las suposiciones visibles del escenario de oraculo
+  cuando hay una ruta economica probada hacia la posicion.
+- Simulate AMM Liquidity Drop: estresa la liquidez en un rango de 0 a 100 por
+  ciento. En el 100 por ciento la ruta se considera no disponible.
+- Show experimental ML indicators: opcion desactivada por defecto que muestra
+  estimaciones orientativas de modelos entrenados con datos sinteticos. No
+  modifica las probabilidades, la severidad, la perdida esperada ni la
+  recomendacion determinista.
+
+2.3 Alertas del oraculo
+
+Las alertas admiten dos fuentes:
+
+- Simulated log subscription: el usuario define un movimiento y publica una
+  observacion simulada. La alerta se produce solo por encima del 3 por ciento
+  absoluto; +3 y -3 exactos no disparan.
+- Live oracle polling: consulta el feed configurado cada cinco segundos
+  mientras esta activa la sesion de navegador. La primera observacion valida
+  establece una linea base; las lecturas fallidas no se sustituyen por datos
+  simulados para generar alertas.
+
+Un incidente permanece activo aunque se cierre el popup. Acknowledge cierra el
+popup; Reset monitor / clear incident limpia el estado. Cambiar cadena, feed,
+posicion o modo de observacion separa el ambito del monitor para no mezclar
+series distintas.
+
+2.4 Salidas visibles
+
+- Resumen con valor de posicion, coste de salida, perdida esperada de mantener
+  y estado STAY, EXIT o REVIEW.
+- Grafo interactivo de dependencias.
+- Evidencia y limitaciones de cada dependencia.
+- Tabla de nodos afectados, perdida condicional y canal implicado.
+- Desglose de horizonte, probabilidad, severidad, perdida condicional,
+  impacto esperado en cartera y coste de salida.
+- Probabilidad de equilibrio, si existe una ruta de respaldo hacia la
+  posicion y una cotizacion utilizable.
+- Recomendacion con razonamiento textual y advertencias.
+- Historial de hasta 25 observaciones de oraculo.
+- Panel opcional de indicadores ML.
+
+STAY y EXIT comparan costes bajo los supuestos indicados; REVIEW se utiliza si
+el descubrimiento es incompleto, no hay coste de salida utilizable o un
+incidente confirmado bloquea la ruta modelada. Un aviso de monitor no demuestra
+una perdida economica si no existe una arista de capital hasta la posicion.
+
+3. MODELO DE IMPACTO
+
+modules/impact.py representa las relaciones mediante un grafo dirigido y
+acilico. Cada nodo tiene un identificador unico y puede declarar dependencias
+por canal:
+
+- capital: relaciones cuyo deterioro puede afectar el respaldo o valor de la
+  posicion.
+- exit: elementos necesarios para vender por la ruta descrita.
+- monitor: feeds de observacion; no son automaticamente dependencias
+  economicas.
+
+graph valida identificadores, presencia del nodo position, referencias a
+nodos existentes y ausencia de ciclos. propagate transmite la severidad por
+las aristas de capital, calcula nodos afectados, un camino explicativo al
+holding y si el incidente alcanza una dependencia de salida. Si varias ramas
+convergentes representan el mismo evento, se toma la perdida maxima y no se
+suman las ramas: se evita contar dos veces el mismo evento.
+
+evaluate calcula:
+
+  perdida condicional = valor de posicion x severidad que alcanza la posicion
+  perdida esperada = probabilidad del evento x perdida condicional
+  impacto de cartera = perdida / NAV
+  probabilidad de equilibrio = coste de salida / perdida condicional
+
+La severidad se refiere a una perdida futura adicional desde el valor actual.
+Un movimiento de precio que ya se reflejo en el valor de hoy no se vuelve a
+cobrar. Para eventos sin ruta de capital, el modelo no inventa una perdida de
+respaldo.
+
+4. MODULOS DE LA APLICACION
+
+app.py
+  Punto de entrada de Streamlit. Construye la interfaz, selecciona presets,
+  cadenas, direcciones y adaptadores; administra controles y estado de sesion;
+  carga escenarios y cotizaciones con cache; ejecuta el modelo impact; muestra
+  grafo, metricas, advertencias y recomendacion; y mantiene el monitor de
+  oraculo. render_flow adapta el grafo a streamlit-flow-component y conserva
+  su estado para evitar reinicializarlo innecesariamente. load_quote aplica
+  una aproximacion de estres de liquidez a una cotizacion Pendle. El fragmento
+  poll_oracle consulta el feed sin cache cada cinco segundos.
+
+modules/chains.py
+  Define Chain, un registro con identificador, nombre, chain ID, endpoints RPC,
+  direccion WETH, feed ETH/USD y explorador para Ethereum, Arbitrum y Optimism.
+  get_chain valida y devuelve la configuracion de una red.
+
+modules/discovery.py
+  Implementa dos adaptadores. discover_token crea un grafo acotado para cadena,
+  token, pool, token de contraparte y monitor opcional; marca descubrimientos
+  incompletos cuando faltan relaciones o metadatos. discover_pendle transforma
+  la evidencia validada del adaptador Pendle en nodos de activo, yield, SY,
+  PT, pool y posicion. No inventa relaciones de prestamo. Los L2 incluyen
+  relaciones de liquidacion/secuenciador configuradas, no un monitor de
+  disponibilidad.
+
+modules/dependencies.py
+  Carga escenarios preset y, opcionalmente, obtiene precios, liquidez y TVL
+  para enriquecer sus datos. Valida direcciones, enruta direcciones EVM al
+  adaptador token o Pendle, asigna por separado dependencias de capital,
+  salida y monitor, y marca condiciones de salud para oraculos y AMM. El tipo
+  DependencyNode representa nodos visuales. to_flow_elements convierte los
+  nodos y aristas a objetos de streamlit-flow-component. El enriquecimiento de
+  un preset no prueba que exista una posicion real.
+
+modules/pendle.py
+  Integra con la API de Pendle y lecturas de contratos Web3 de solo lectura.
+  find_market pagina el catalogo y resuelve una direccion de mercado o PT en
+  la cadena elegida. verify_market compara sy/PT/YT, decimales, madurez,
+  activos de salida SY, activo contable y tipo de cambio, leyendo los contratos
+  en un mismo bloque. snapshot devuelve mercado y evidencia; si la
+  verificacion falla, informa indisponibilidad en vez de construir un grafo
+  falso. exit_quote pide una vista previa de venta PT -> USDC, valida
+  antiguedad del precio y decimales, selecciona la ruta con mayor salida y
+  convierte la salida a USD usando el precio observado de USDC. No firma ni
+  envia transacciones; no garantiza ejecucion ni valida saldo o aprobaciones.
+
+modules/fetcher.py
+  Recopila datos externos. _get_web3 prueba RPC de la red y verifica el chain
+  ID. get_chainlink_price valida rondas y decimales del feed; puede devolver
+  datos de demostracion para enriquecimiento no critico, pero la monitorizacion
+  estricta puede desactivar ese fallback. get_token_liquidity filtra pares de
+  DEX Screener por cadena y direccion, selecciona el de mayor liquidez y
+  devuelve liquidez, volumen y cambio de 24 horas. get_protocol_tvl obtiene el
+  TVL de DeFiLlama. get_coin_price devuelve un precio opcional y permite
+  rechazar datos viejos. get_yield_pools filtra pools de rendimiento por
+  protocolo y texto de simbolo. Algunos fallos externos se representan como
+  datos mock en flujos de demostracion; las rutas de descubrimiento de cadena
+  pueden devolver "unavailable" para no fingir evidencia.
+
+modules/incidents.py
+  OracleMonitor valida fuente, precio y timestamp; ignora datos mock, eventos
+  invalidos, duplicados y fuera de orden; compara cada precio con la
+  observacion valida previa del mismo ambito; conserva hasta 25 observaciones;
+  activa un incidente ante una desviacion estrictamente superior al 3 por
+  ciento; y mantiene el incidente hasta reset.
+
+modules/mock_data.py
+  Contiene nombres de presets, grafos de demostracion, valores de respaldo
+  offline, liquidez/TVL de fallback e inputs sinteticos para los indicadores
+  ML. Estas cifras no son garantias ni una fuente de riesgo calibrada.
+
+modules/risk_engine.py
+  Conserva heuristicas legacy de demostracion: perdida por profundidad,
+  componentes estaticos de oraculo/concentracion/depeg, decision EV anterior
+  y tabla de riesgos por capa. La app activa usa modules/impact.py para la
+  recomendacion principal; risk_engine se usa, entre otras cosas, para la
+  aproximacion de salida no Pendle y el umbral de staleness.
+
+modules/ml_engine.py
+  Ajusta tres modelos ligeros a datos generados sinteticamente: Ridge con
+  variables polinomicas para slippage, Isolation Forest y reglas auxiliares
+  para anomalias de oraculo, y regresion logistica para depeg. Valida
+  finitud/rangos basicos y expone predicciones acotadas. No se entrena con
+  incidentes reales y sus salidas solo se muestran como indicadores
+  experimentales. Se carga un pipeline por proceso.
+
+modules/__init__.py
+  Inicializador del paquete modules; permite las importaciones relativas
+  utilizadas por el proyecto.
+
+5. COSTE DE SALIDA Y APROXIMACIONES
+
+Para posiciones Pendle PT, el coste parte de la salida cotizada a USDC con las
+comisiones de swap/agregador ya reflejadas y anade el presupuesto de gas
+introducido por el usuario. Se rechazan precios de PT de mas de 15 minutos.
+El estres de liquidez amplifica el tamano consultado y reescala el coste: es un
+proxy de profundidad uniforme, no una simulacion exacta de la curva temporal
+de Pendle.
+
+Para otros escenarios se usa la aproximacion no calibrada:
+
+  slippage = min(1, 0.5 x (tamano / liquidez)^2)
+  coste = slippage + comision asumida de 0.5 por ciento, limitado a 100 por ciento
+
+No es una cotizacion ejecutable. Una ruta invalida o inexistente produce
+REVIEW en vez de recomendar salir con un coste desconocido.
+
+6. ARCHIVOS DE PRUEBAS Y CONFIGURACION
+
+tests/test_app.py
+  Prueba controles de estres, metricas y badges, alertas simuladas y en vivo,
+  deduplicacion, aislamiento por cadena, revision ante lecturas fallidas,
+  seleccion de Pendle, persistencia del grafo y que los indicadores ML no
+  cambien la recomendacion.
+
+tests/test_dependencies.py
+  Prueba carga de presets, enriquecimiento, reglas de salud y conversion del
+  grafo.
+
+tests/test_fetcher.py
+  Prueba respuestas/fallos de Chainlink, DEX Screener, DeFiLlama, precios,
+  pools de yield y extraccion de variables de mercado.
+
+tests/test_impact.py
+  Prueba validacion del grafo, propagacion, caminos, eventos que no afectan
+  capital, impacto en cartera, probabilidades y casos REVIEW.
+
+tests/test_incidents.py
+  Prueba umbral estricto, entradas invalidas, orden/duplicacion de eventos,
+  reset y aislamiento de incidentes.
+
+tests/test_multichain.py
+  Prueba configuracion de redes, aislamiento por chain y escenarios de
+  descubrimiento multi-chain.
+
+tests/test_pendle.py
+  Prueba busqueda paginada, verificaciones on-chain, desacuerdos API/contrato,
+  fallos de discovery y seleccion/calculo de cotizaciones.
+
+tests/test_risk_engine.py
+  Prueba las formulas y decisiones del motor legacy. Algunas pruebas conservan
+  ejemplos antiguos; no describen por si solas el algoritmo de impacto activo.
+
+tests/test_ml_indicators.py
+  Prueba monotonicidad/rangos y entradas invalidas de los indicadores
+  sinteticos. Se omite si no estan instalados numpy o scikit-learn.
+
+pytest.ini
+  Limita la coleccion de pruebas al directorio tests. Evita recoger la copia
+  de test_ml_engine.py que existe dentro de ml-advanced.
+
+requirements.txt
+  Dependencias base para Streamlit, Web3, requests, el grafo y su componente
+  visual.
+
+requirements-ml.txt
+  Dependencias opcionales para los indicadores experimentales: numpy y
+  scikit-learn, ademas de requirements.txt.
+
+requirements-dev.txt
+  Dependencias de desarrollo; incluye las de runtime y pytest.
+
+README.md
+  Guia de instalacion, uso, alcance, decisiones de modelado, limitaciones,
+  arquitectura y pruebas.
+
+7. DIRECTORIO ml-advanced
+
+ml-advanced/ contiene una implementacion/prototipo alternativo de motor ML,
+risk_engine, app, fetcher, dependencias, datos y pruebas. La aplicacion activa
+usa app.py y modules/; el contenido de ml-advanced no se importa como ruta
+principal. Las piezas de indicadores ML que se integraron se adaptaron a
+modules/ml_engine.py y a los campos de descubrimiento actuales. La carpeta se
+mantiene como referencia separada y no debe confundirse con la ruta activa.
+
+8. COMO EJECUTAR
+
+Desde la carpeta principal, instalar runtime:
+
+  python -m pip install -r requirements.txt
+
+Para incluir indicadores ML experimentales:
+
+  python -m pip install -r requirements-ml.txt
+
+Para desarrollo y pruebas:
+
+  python -m pip install -r requirements-dev.txt
+  python -m pytest -q
+
+Para iniciar la interfaz:
+
+  python -m streamlit run app.py
+
+9. LIMITACIONES IMPORTANTES
+
+- La evidencia de API, los datos de mercado y la disponibilidad de RPC
+  dependen de servicios publicos externos.
+- Un grafo verificado no implica que los protocolos esten sanos.
+- Los grafos preset son ejemplos; su enriquecimiento con datos actuales no
+  valida cada relacion economica representada.
+- La deteccion de token no descubre automaticamente vaults, prestamos,
+  colateral, deuda ni integraciones internas arbitrarias.
+- La etiqueta o precio del proveedor puede proceder de metadatos API; las
+  relaciones contractuales Pendle descritas se contrastan on-chain.
+- Los indicadores ML sinteticos son experimentales y no deben interpretarse
+  como probabilidades fiables o asesoramiento.
+- El sistema compara un evento y una posicion sin apalancamiento; no modela
+  cascadas de liquidacion ni el riesgo total de una cartera multiposicion.
+- Una vista previa de venta no es ejecucion, no garantiza liquidez posterior y
+  no sustituye una revision de seguridad del contrato/ruta.

@@ -55,8 +55,12 @@ def propagate(scenario, target, severity):
                 paths[key] = paths[parent] + [key]
     affected = {target} | {key for key, value in loss.items() if value > 0}
     # An incident can obstruct an exit even when it does not impair backing.
+    # FIX: the position itself is not an exit dependency. nx.has_path(g, n, n) is
+    # True, so including "position" flagged every backing-loss event as blocking
+    # the exit route.
     exits, _ = graph(scenario, "exit")
-    blocked = any(nx.has_path(exits, key, "position") for key in affected)
+    blocked = any(nx.has_path(exits, key, "position")
+                  for key in affected if key != "position")
     path = paths.get("position", [])
     return {"loss_fraction": loss["position"], "node_losses": loss,
             "affected_nodes": affected, "exit_dependency_affected": blocked,
