@@ -29,6 +29,28 @@ def test_get_token_liquidity_live_success(mock_get):
     assert res["total_liquidity_usd"] == 1000000.0
     assert res["pair_count"] == 2
 
+
+@patch("modules.fetcher.requests.get")
+def test_get_token_liquidity_exposes_finite_ml_features(mock_get):
+    token_address = "0x" + "1" * 40
+    response = MagicMock()
+    response.json.return_value = {"pairs": [{
+        "chainId": "ethereum",
+        "baseToken": {"address": token_address, "symbol": "TOK"},
+        "quoteToken": {"address": "0x" + "2" * 40, "symbol": "USD"},
+        "liquidity": {"usd": 600_000},
+        "dexId": "uniswap",
+        "priceUsd": "3200.50",
+        "volume": {"h24": "120000"},
+        "priceChange": {"h24": "-4.5"},
+    }]}
+    mock_get.return_value = response
+
+    result = get_token_liquidity(token_address, chain="ethereum")
+
+    assert result["volume_24h_usd"] == 120_000
+    assert result["volatility_index"] == pytest.approx(0.045)
+
 @patch('modules.fetcher.requests.get')
 def test_get_token_liquidity_live_no_pairs(mock_get):
     """Cubre el bloque ValueError dentro del try si la API responde pero no trae pares."""

@@ -113,6 +113,10 @@ def discover_token(address: str, chain: str, *, live: bool = True,
     complete = bool(pool_found and wrapped_eth)
     error = (None if complete else data.get("error") or
              "A pool was found, but this token's backing/yield dependencies are unresolved. Use the Pendle PT adapter for Pendle positions.")
+    ml_features = {
+        name: data[name] for name in ("volume_24h_usd", "volatility_index")
+        if data.get(name) is not None
+    }
     return {
         "key": address, "chain": chain, "name": f"Custom position {address[:6]}…{address[-4:]} ({symbol})",
         "fallback_key": "pendle_pt_eeth", "token_address": address,
@@ -123,6 +127,8 @@ def discover_token(address: str, chain: str, *, live: bool = True,
         "data_source": f"discovery:{data['source']} ({chain})", "dependencies": nodes,
         "discovery_complete": complete, "discovery_error": error, "adapter": "token",
         "observed_at": data.get("observed_at", time.time()), "tvl_slugs": {},
+        "ml_features": ml_features,
+        "ml_feature_source": "DEX Screener 24h pair data" if ml_features else "neutral model defaults",
         "model_note": "Token/pool metadata discovery; supported exposure is configured native WETH. Other tokens require a protocol adapter. "
                       "Price monitors are not capital dependencies. Exit depth estimates and incident probabilities are assumptions.",
     }

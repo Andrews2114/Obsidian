@@ -112,3 +112,28 @@ MOCK_PROTOCOL_TVL = {
     "pendle": 4_000_000_000,
     "morpho-blue": 5_000_000_000,
 }
+
+# Illustrative ML inputs only; these values are synthetic priors, not observed
+# market data or calibrated estimates.
+MOCK_ML_FEATURES = {
+    "pendle_pt_eeth": {
+        "volume_24h_usd": 700_000,
+        "volatility_index": 0.05,
+        "price_deviation_pct": 0.001,
+        "historical_volatility": 0.03,
+        "backing_ratio": 0.9995,
+        "pool_imbalance_ratio": 0.52,
+    },
+    "compromised_vault": {
+        "volume_24h_usd": 20_000,
+        "volatility_index": 0.15,
+        "price_deviation_pct": 0.03,
+        "historical_volatility": 0.12,
+        "backing_ratio": 0.985,
+        "pool_imbalance_ratio": 0.80,
+    },
+}
+
+for _scenario_key, _features in MOCK_ML_FEATURES.items():
+    SCENARIOS[_scenario_key]["ml_features"] = dict(_features)
+    SCENARIOS[_scenario_key]["ml_feature_source"] = "synthetic demonstration inputs"

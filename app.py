@@ -124,6 +124,11 @@ with st.sidebar:
                             key=f"stale_{scope_key}")
     liq_drop = st.slider("Simulate AMM Liquidity Drop (%)", 0, 100, 0, key=f"drop_{scope_key}")
     st.caption("The recommendation recalculates whenever a slider changes.")
+    ml_enabled = st.checkbox(
+        "Show experimental ML indicators",
+        value=False,
+        help="Displays synthetic-prior model estimates for comparison only. They do not change the scenario decision.",
+    )
     with st.expander("Oracle failure assumptions"):
         oracle_probability = st.number_input("Loss-event probability after oracle alert (%)", 0.0, 100.0, 50.0) / 100
         oracle_severity = st.number_input("Additional loss if oracle event happens (%)", 0.0, 100.0, 50.0) / 100
@@ -224,6 +229,42 @@ if monitor_enabled and monitor_mode == "Live oracle polling":
 if review_reasons:
     result.update(decision="REVIEW", net_benefit_usd=None,
                   reasoning=result["reasoning"] + " " + " ".join(review_reasons))
+
+ml_indicators = None
+ml_import_error = None
+if ml_enabled:
+    try:
+        from modules.ml_engine import get_pipeline
+    except ImportError as exc:
+        ml_import_error = str(exc)
+    else:
+        pipeline = get_pipeline()
+        features = scenario.get("ml_features", {})
+        volume_24h = features.get("volume_24h_usd")
+        if volume_24h is None:
+            volume_24h = eff_liquidity
+        ml_indicators = {
+            "slippage": (
+                pipeline.predict_dynamic_slippage(
+                    position_size, eff_liquidity, volume_24h,
+                    features.get("volatility_index", 0.05),
+                )
+                if eff_liquidity > 0 else None
+            ),
+            "oracle": pipeline.detect_oracle_anomaly(
+                int(effective_stale * 3600),
+                features.get("price_deviation_pct", abs(deviation) / 100),
+                features.get("historical_volatility", 0.03),
+            ),
+            "depeg": (
+                pipeline.predict_depeg_probability(
+                    features["backing_ratio"], features["pool_imbalance_ratio"],
+                )
+                if "backing_ratio" in features and "pool_imbalance_ratio" in features
+                else None
+            ),
+            "feature_source": scenario.get("ml_feature_source", "neutral model defaults"),
+        }
 nodes = deps.build_dependency_tree(scenario, position_size, effective_stale, liq_drop, deviation)
 for node in nodes:
     if node.node_id in result["affected_nodes"] and model_severity > 0:
@@ -316,6 +357,31 @@ with st.container(border=True):
         st.markdown(esc("Modelled advantage: $" + f"{result['net_benefit_usd']:,.0f}"))
     st.markdown(esc(result["reasoning"]))
     st.caption("One-event scenario comparison for an unlevered exposure. These probabilities are analyst inputs, not calibrated forecasts. Lending liquidation, correlated incidents, foregone yield and a multi-position portfolio are outside this model.")
+
+if ml_enabled:
+    with st.expander("Experimental ML indicators (advisory only)", expanded=True):
+        st.warning(
+            "These models are trained on synthetic priors, not historical incident or execution data. "
+            "They never change the graph-based recommendation or its user-supplied probability/severity."
+        )
+        if ml_import_error:
+            st.info(
+                f"ML indicators could not load ({ml_import_error}). Install optional packages with "
+                "`pip install -r requirements-ml.txt` to enable them."
+            )
+        elif ml_indicators:
+            st.caption(f"Feature inputs: {ml_indicators['feature_source']}.")
+            slippage = ml_indicators["slippage"]
+            st.metric(
+                "ML exit-slippage indicator",
+                f"{slippage:.2%}" if slippage is not None else "Unavailable (no usable liquidity)",
+            )
+            oracle = ml_indicators["oracle"]
+            first, second = st.columns(2)
+            first.metric("Oracle anomaly score", f"{oracle['anomaly_score']:.2f}")
+            second.metric("Modelled stale probability", f"{oracle['predicted_stale_probability']:.2%}")
+            if ml_indicators["depeg"] is not None:
+                st.metric("Synthetic-prior depeg indicator", f"{ml_indicators['depeg']:.2%}")
 
 
 @st.fragment(run_every="5s")
