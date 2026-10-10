@@ -1,5 +1,7 @@
 # Obsidian
 
+https://obsidian-sentinel.streamlit.app
+
 DeFi Risk Sentinel is a Streamlit-based risk-analysis dashboard for evaluating whether a DeFi position should be exited or held under stress conditions. It models dependency risk across settlement, yield, oracle, AMM, and lending layers, then compares the guaranteed cost of unwinding a position against the expected loss of staying in it.
 
 This project was built for the EPFL Hackathon 2026 / Belem Capital Challenge and focuses on portfolio action decisions for risky on-chain positions.
