@@ -3,3 +3,5 @@ web3>=7,<9
 requests>=2.31,<3
 streamlit-flow-component>=1.6,<2
 networkx>=3,<4
+numpy>=1.26
+scikit-learn>=1.7,<2
