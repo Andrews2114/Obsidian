@@ -128,3 +128,26 @@ def test_stay_loss_and_decision_engine_matrix():
                           oracle_stale_hours=0.0, protocol_concentration_risk=0.01, depeg_risk=0.0)
     except Exception:
         pass
+# Agregar al final de tests/test_risk_engine.py
+
+def test_evaluate_decision_exact_tie():
+    """Prueba el caso de empate exacto (EV_stay == L_exit)."""
+    # Si las pérdidas esperadas son iguales, debe aplicar el guardarraíl por defecto (STAY o EXIT según tu regla)
+    result = evaluate_decision(position_size_usd=100_000, exit_loss_pct=0.05, stay_loss_pct=0.05)
+    assert "decision" in result
+    assert result["decision"] in ["STAY", "EXIT"]
+
+
+def test_evaluate_decision_zero_liquidity():
+    """Prueba la reacción del motor ante liquidez cero o vacía (evita ZeroDivisionError)."""
+    # Probar que la función maneja escenarios límite sin arrojar excepciones no capturadas
+    exit_loss = calculate_exit_loss(position_size_usd=100_000, pool_liquidity_usd=0, base_fee_pct=0.005)
+    # Debe topar el slippage o retornar la pérdida máxima (1.0 = 100%)
+    assert exit_loss >= 1.0
+
+
+def test_evaluate_decision_overflow_risk():
+    """Prueba que los porcentajes de riesgo extremos no superen el 100% (1.0)."""
+    stay_loss = calculate_stay_loss(oracle_stale=True, protocol_concentration_risk=10.0, depeg_risk=5.0)
+    # La pérdida acumulada debe estar topada en 1.0
+    assert stay_loss <= 1.0

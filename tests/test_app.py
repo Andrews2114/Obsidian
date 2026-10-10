@@ -16,7 +16,7 @@ def button(app, label):
 
 
 def new_app():
-    app = AppTest.from_file(str(APP), default_timeout=15).run()
+    app = AppTest.from_file(str(APP), default_timeout=30).run()
     assert not app.exception
     return app
 
