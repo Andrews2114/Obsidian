@@ -3,7 +3,7 @@ import hashlib
 import math
 import time
 import streamlit as st
-from modules import dependencies as deps, fetcher, mock_data, risk_engine, impact, pendle
+from modules import dependencies as deps, fetcher, mock_data, risk_engine, impact, pendle, theme
 from modules.chains import CHAINS, get_chain
 from modules.incidents import OracleMonitor
 
@@ -63,8 +63,8 @@ def incident_popup(incident, result):
         st.rerun()
 
 
-st.title("Obsidian - DeFi Risk Sentinel")
-st.caption("EPFL Hackathon 2026 | Belem Capital Challenge")
+# st.title("Obsidian - DeFi Risk Sentinel")
+# st.caption("EPFL Hackathon 2026 | Belem Capital Challenge")
 
 with st.sidebar:
     st.header("Controls")
@@ -107,7 +107,7 @@ with st.sidebar:
         st.error("Portfolio NAV must include the entire position value.")
         st.stop()
     scope_key = f"{chain}:{scenario.get('adapter')}:{scenario['key']}:{scenario.get('oracle_address')}"
-    st.subheader("Failure Scenario Assumptions")
+    theme.section("Failure Scenario Assumptions","...")
     horizon = st.number_input("Decision horizon (days)", min_value=1, max_value=365, value=7)
     dependency_selector_slot = st.empty()
     event_kind = st.selectbox("Incident type", ["Security incident", "Market disruption", "Technical failure"])
@@ -281,7 +281,7 @@ for node in nodes:
     # FIX: a zero-probability event should not colour the graph as an affected path.
     if node.node_id in result["affected_nodes"] and model_severity > 0 and model_probability > 0:
         node.health_status = "critical" if confirmed else "warning"
-st.caption(f"**{scenario['name']}** · {chain_config.name} · data source: {scenario['data_source']}")
+theme.masthead(chain_config.name, scenario["data_source"], scenario["name"])
 st.caption(scenario.get("model_note", "Reference graph and market inputs are demonstration data."))
 if scenario.get("adapter") == "reference":
     st.info("Reference demo: relationships are predefined. Select Discover Pendle PT Dependencies to verify a real position.")
@@ -293,7 +293,8 @@ if oracle_event:
     st.caption("Oracle stress uses the visible oracle probability/severity assumptions." if oracle_is_economic else
                "This feed is a monitoring benchmark. Its alert has no proven capital-loss path into this holding.")
 
-c1, c2, c3, c4 = st.columns(4)
+theme.verdict(result, exit_cost, horizon)
+c1, c2, c3 = st.columns(3)
 c1.metric("Position Value", "$" + f"{position_size:,.0f}", f"{position_size / portfolio_nav:.2%} of NAV", delta_color="off")
 c2.metric("Estimated Exit Cost", "$" + f"{exit_cost:,.0f}" if exit_cost is not None else "Unavailable",
           f"{exit_cost / position_size:.2%}" if exit_cost is not None else None, delta_color="off")
