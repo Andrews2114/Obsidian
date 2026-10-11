@@ -300,14 +300,14 @@ c2.metric("Estimated Exit Cost", "$" + f"{exit_cost:,.0f}" if exit_cost is not N
           f"{exit_cost / position_size:.2%}" if exit_cost is not None else None, delta_color="off")
 c3.metric("Modelled Loss of Staying", "$" + f"{result['stay_loss_usd']:,.0f}",
           f"{result['portfolio_loss_pct']:.2%} of portfolio NAV", delta_color="off")
-with c4:
-    st.caption("Recommendation")
-    if result["decision"] == "EXIT":
-        st.error("🚨 ACTION: EXIT")
-    elif result["decision"] == "REVIEW":
-        st.warning("⚠️ REVIEW REQUIRED")
-    else:
-        st.success("✅ DECISION: STAY")
+# with c4:
+#     st.caption("Recommendation")
+#     if result["decision"] == "EXIT":
+#         st.error("🚨 ACTION: EXIT")
+#     elif result["decision"] == "REVIEW":
+#         st.warning("⚠️ REVIEW REQUIRED")
+#     else:
+#         st.success("✅ DECISION: STAY")
 
 st.subheader("Interactive Dependency Visualizer")
 flow_key = "flow-" + hashlib.md5((scope_key + repr([(n.node_id, n.health_status, n.details, n.depends_on) for n in nodes])).encode()).hexdigest()[:10]
