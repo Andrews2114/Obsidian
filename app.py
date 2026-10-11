@@ -318,12 +318,26 @@ with st.expander("Dependency evidence and scope"):
         "Exit dependencies": ", ".join(n.get("exit_dependencies", ())),
         "Monitor dependencies": ", ".join(n.get("monitor_dependencies", ()))} for n in scenario["dependencies"]])
 
+# st.subheader("How the Failure Reaches Your Position")
+# st.write(esc(result["trace"]))  # FIX: node labels may contain "$" (e.g. "$200k TVL")
+# st.table([{"Dependency": n.label,
+#     "Additional loss if event happens": f"{result['node_losses'].get(n.node_id, 0):.2%}",
+#     "Channel": "Backing impaired" if result["node_losses"].get(n.node_id, 0) else "Exit / monitoring / unaffected"}
+#     for n in nodes])
 st.subheader("How the Failure Reaches Your Position")
 st.write(esc(result["trace"]))  # FIX: node labels may contain "$" (e.g. "$200k TVL")
+def channel(n):
+    if n.node_id in result["path"]:
+        return "Backing impaired (reaches position)"
+    if result["node_losses"].get(n.node_id, 0):
+        return "Failing node (no backing path to position)"
+    return "Exit / monitoring / unaffected"
+
 st.table([{"Dependency": n.label,
     "Additional loss if event happens": f"{result['node_losses'].get(n.node_id, 0):.2%}",
-    "Channel": "Backing impaired" if result["node_losses"].get(n.node_id, 0) else "Exit / monitoring / unaffected"}
+    "Channel": channel(n)}
     for n in nodes])
+
 if result["exit_dependency_affected"]:
     st.caption("This event also reaches an exit dependency. An assumed future event leaves today's route available; marking it already active requires route review.")
 st.caption("Loss passes through backing links once. Multiple paths from the same event are not added together. Severity is an additional loss from today's mark, so a realised price drop is not charged again.")
